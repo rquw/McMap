@@ -306,10 +306,8 @@
     worldCopyJump: true,
     minZoom: 2,
     maxZoom: 19,
-    zoomSnap: 0,                 // continuous zoom reads far smoother on vector tiles
-    zoomDelta: 0.6,
-    wheelPxPerZoomLevel: 110,
-    wheelDebounceTime: 24,
+    zoomSnap: 0,        // fractional zoom; the wheel handler below drives it
+    zoomDelta: 1,       // but the +/- buttons still step by a whole level
     attributionControl: true
   }).setView([25, 8], 2.5);
 
@@ -336,6 +334,58 @@
   }
 
   L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  /* Leaflet's wheel handler waits out a debounce and then starts a 250 ms zoom
+     animation. On a trackpad the next event lands long before that finishes,
+     so every animation is cancelled by the one after it and the gesture
+     stutters. Applying the accumulated delta once per animation frame, with no
+     animation at all, is what continuous zoom is meant to feel like — the
+     frames themselves are the animation. */
+  map.scrollWheelZoom.disable();
+
+  var wheelAccum = 0, wheelPoint = null, wheelFrame = null;
+
+  var WHEEL_PX_PER_ZOOM = 220;   // deltaY needed for one zoom level
+  var WHEEL_MAX_PER_FRAME = 0.5; // levels; a hard flick glides instead of jumping
+
+  function applyWheel() {
+    wheelFrame = null;
+    if (!wheelPoint) return;
+
+    var step = wheelAccum / WHEEL_PX_PER_ZOOM;
+    if (step > WHEEL_MAX_PER_FRAME) step = WHEEL_MAX_PER_FRAME;
+    else if (step < -WHEEL_MAX_PER_FRAME) step = -WHEEL_MAX_PER_FRAME;
+
+    // keep whatever we clamped off and spend it on the following frames, so a
+    // fast flick glides to a stop rather than teleporting
+    wheelAccum -= step * WHEEL_PX_PER_ZOOM;
+    if (Math.abs(wheelAccum) < 1) wheelAccum = 0;
+
+    var from = map.getZoom();
+    var to = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), from - step));
+
+    if (Math.abs(to - from) > 1e-4) {
+      map.setZoomAround(wheelPoint, to, { animate: false });
+    } else {
+      wheelAccum = 0;
+    }
+
+    if (wheelAccum && !wheelFrame) wheelFrame = L.Util.requestAnimFrame(applyWheel);
+  }
+
+  L.DomEvent.on(map.getContainer(), 'wheel', function (e) {
+    e.preventDefault();
+
+    var dy = e.deltaY;
+    if (e.deltaMode === 1) dy *= 20;          // reported in lines
+    else if (e.deltaMode === 2) dy *= 400;    // reported in pages
+
+    // a trackpad pinch arrives as ctrl+wheel with much smaller deltas
+    wheelAccum += e.ctrlKey ? dy * 3 : dy;
+    wheelPoint = map.mouseEventToContainerPoint(e);
+
+    if (!wheelFrame) wheelFrame = L.Util.requestAnimFrame(applyWheel);
+  });
 
   map.createPane('scope');
   map.getPane('scope').style.zIndex = 350;
@@ -465,10 +515,13 @@
 
   var DotLayer = L.Layer.extend({
     onAdd: function (map) {
-      var c = this._canvas = L.DomUtil.create('canvas', 'mcmap-dots');
+      /* leaflet-zoom-animated gives us transform-origin: 0 0 and the shared
+         zoom transition. Without it the canvas scales about its own centre and
+         every dot slides away during the zoom, snapping back on settle. */
+      var c = this._canvas = L.DomUtil.create('canvas', 'mcmap-dots leaflet-zoom-animated');
       this._ctx = c.getContext('2d');
       map.getPane('dots').appendChild(c);
-      map.on('moveend zoomend resize', this._reset, this);
+      map.on('moveend zoomend resize', this._schedule, this);
       if (map.options.zoomAnimation && L.Browser.any3d) {
         map.on('zoomanim', this._zoomAnim, this);
       }
@@ -477,7 +530,8 @@
 
     onRemove: function (map) {
       L.DomUtil.remove(this._canvas);
-      map.off('moveend zoomend resize', this._reset, this);
+      if (this._frame) L.Util.cancelAnimFrame(this._frame);
+      map.off('moveend zoomend resize', this._schedule, this);
       map.off('zoomanim', this._zoomAnim, this);
     },
 
@@ -490,24 +544,48 @@
       L.DomUtil.setTransform(this._canvas, offset, scale);
     },
 
-    _reset: function () {
+    /* Wheel zooming applies a new zoom every frame, so reset can fire far more
+       often than we can usefully draw. Collapse it to one pass per frame. */
+    _schedule: function () {
+      var self = this;
+      if (this._frame) return;
+      this._frame = L.Util.requestAnimFrame(function () {
+        self._frame = null;
+        self._reset();
+      });
+    },
+
+    /* Park the canvas over the padded viewport and remember where that is.
+       Dot pixel positions are derived from this, so the two must never be
+       computed from different map states — if they are, every dot lands at a
+       stale offset and the layer looks like it slid off the map. */
+    _place: function () {
       var map = this._map;
-      if (!map) return;
       var size = map.getSize();
       var pad = L.point(Math.round(size.x * DOT_PAD), Math.round(size.y * DOT_PAD));
       var origin = map.containerPointToLayerPoint(pad.multiplyBy(-1)).round();
-      var w = size.x + pad.x * 2, h = size.y + pad.y * 2;
+
+      L.DomUtil.setPosition(this._canvas, origin);
+      this._origin = origin;
+      this._nw = map.layerPointToLatLng(origin);
+      return { size: size, pad: pad };
+    },
+
+    _reset: function () {
+      var map = this._map;
+      if (!map) return;
+
+      var at = this._place();
+      var w = at.size.x + at.pad.x * 2, h = at.size.y + at.pad.y * 2;
       var dpr = Math.min(window.devicePixelRatio || 1, 2);
 
       var c = this._canvas;
-      c.width = Math.round(w * dpr);
-      c.height = Math.round(h * dpr);
-      c.style.width = w + 'px';
-      c.style.height = h + 'px';
-      L.DomUtil.setPosition(c, origin);
-
-      this._origin = origin;
-      this._nw = map.layerPointToLatLng(origin);
+      if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+        c.width = Math.round(w * dpr);
+        c.height = Math.round(h * dpr);
+        c.style.width = w + 'px';
+        c.style.height = h + 'px';
+      }
       this._ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       this.redraw();
     },
@@ -515,6 +593,7 @@
     redraw: function () {
       var map = this._map, ctx = this._ctx;
       if (!map || !ctx || !DB) return;
+      this._place();
 
       var w = this._canvas.width, h = this._canvas.height;
       ctx.save();
@@ -546,15 +625,26 @@
         if (!list.length) return;
         ctx.globalAlpha = alpha;
         ctx.fillStyle = color;
-        ctx.beginPath();
-        for (var n = 0; n < list.length; n++) {
-          var j = list[n];
-          var x = DB.mx[j] * scale - ox;
-          var y = DB.my[j] * scale - oy;
-          ctx.moveTo(x + r, y);
-          ctx.arc(x, y, r, 0, 6.2832);
+
+        /* At a few thousand dots the arc calls dominate the frame, and at this
+           radius a square is indistinguishable anyway. */
+        if (list.length > 3000) {
+          var d = r * 2;
+          for (var m = 0; m < list.length; m++) {
+            var q = list[m];
+            ctx.fillRect(DB.mx[q] * scale - ox - r, DB.my[q] * scale - oy - r, d, d);
+          }
+        } else {
+          ctx.beginPath();
+          for (var n = 0; n < list.length; n++) {
+            var j = list[n];
+            var x = DB.mx[j] * scale - ox;
+            var y = DB.my[j] * scale - oy;
+            ctx.moveTo(x + r, y);
+            ctx.arc(x, y, r, 0, 6.2832);
+          }
+          ctx.fill();
         }
-        ctx.fill();
         ctx.globalAlpha = 1;
       }
     }
@@ -569,14 +659,10 @@
     var candidates = indicesInBounds(b, MAX_PINS + 1);
     var wanted = new Set();
 
+    // Past the budget everything becomes a dot, visited ones included — a lone
+    // green pin floating over a field of dots just looks like a mistake.
     if (candidates.length <= MAX_PINS) {
       candidates.forEach(function (i) { wanted.add(i); });
-    } else {
-      // too dense for pins — but your own are always worth a real marker
-      store.ids().forEach(function (id) {
-        var i = DB.byId.get(id);
-        if (i !== undefined && inBounds(b, DB.lat[i], DB.lon[i])) wanted.add(i);
-      });
     }
 
     markers.forEach(function (m, i) { if (!wanted.has(i)) removeMarker(i); });
@@ -1329,7 +1415,7 @@
   var onMove = debounce(function () {
     renderMarkers();
     updateProgress();
-  }, 120);
+  }, 90);
 
   map.on('moveend zoomend', onMove);
 

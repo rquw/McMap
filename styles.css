@@ -318,7 +318,7 @@ a { color: inherit; text-decoration: none; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.mcmap-dots { position: absolute; left: 0; top: 0; pointer-events: none; }
+.mcmap-dots { position: absolute; left: 0; top: 0; pointer-events: none; transform-origin: 0 0; }
 
 /* ---------- hint ---------- */
 
