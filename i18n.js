@@ -43,6 +43,7 @@
 
       searchPlaceholder: 'Search a place',
       noResults: 'Nothing found',
+      searching: 'Searching…',
       marked: 'Marked as visited',
       unmarked: 'Unmarked',
       cleared: 'Map cleared',
@@ -111,6 +112,7 @@
 
       searchPlaceholder: 'Ort suchen',
       noResults: 'Nichts gefunden',
+      searching: 'Suche…',
       marked: 'Als besucht markiert',
       unmarked: 'Markierung entfernt',
       cleared: 'Karte zurückgesetzt',

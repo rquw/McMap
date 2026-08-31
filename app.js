@@ -1108,14 +1108,28 @@
       if (hits.length > 4000) break;
     }
     hits.sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
-    return hits.slice(0, 7).map(function (h) { return h[2]; });
+
+    /* City-states appear twice — Wien the region and Wien the city hold the
+       same restaurants. One row is enough. */
+    var seen = {}, out = [];
+    for (var h = 0; h < hits.length && out.length < 7; h++) {
+      var e = hits[h][2];
+      var k = e.norm + '|' + e.n + '|' + e.sub.split(',').pop().trim();
+      if (seen[k]) continue;
+      seen[k] = 1;
+      out.push(e);
+    }
+    return out;
   }
 
-  function renderResults(rows) {
+  function renderResults(rows, pending) {
     searchRows = rows;
     searchCursor = -1;
     if (!rows.length) {
-      searchResults.innerHTML = '<li class="search__empty">' + esc(T.noResults) + '</li>';
+      /* The bundled names are the local ones (東京都, not Tokyo), so an empty
+         local result usually just means the wider search hasn't landed yet. */
+      searchResults.innerHTML = '<li class="search__empty">' +
+        esc(pending ? T.searching : T.noResults) + '</li>';
       searchResults.classList.add('is-open');
       return;
     }
@@ -1135,30 +1149,44 @@
     searchCursor = -1;
   }
 
+  /* Fly to a result by centre + zoom rather than flyToBounds: getBoundsZoom
+     returns NaN for a degenerate box or a container that has no size yet, and
+     Leaflet then throws on the NaN centre instead of just not moving. */
   function gotoResult(r) {
     closeResults();
     searchInput.blur();
+
     if (r.latlng) {
       map.flyTo(r.latlng, r.zoom || 14, { duration: 1.1 });
       return;
     }
-    var pad = 0.04;
-    if (r.nn - r.s < 0.004 && r.e - r.w < 0.004) {
-      map.flyTo([r.s, r.w], 15, { duration: 1.1 });
-    } else {
-      map.flyToBounds([[r.s - pad, r.w - pad], [r.nn + pad, r.e + pad]],
-                      { duration: 1.1, padding: [40, 40] });
+
+    var lat = (r.s + r.nn) / 2, lon = (r.w + r.e) / 2;
+    if (!isFinite(lat) || !isFinite(lon)) return;
+
+    var size = map.getSize();
+    var tiny = (r.nn - r.s) < 0.004 && (r.e - r.w) < 0.004;
+    if (tiny || !size.x || !size.y) {
+      map.flyTo([lat, lon], 15, { duration: 1.1 });
+      return;
     }
+
+    var z = map.getBoundsZoom(L.latLngBounds([r.s, r.w], [r.nn, r.e]).pad(0.08));
+    map.flyTo([lat, lon], isFinite(z) ? Math.min(z, 16) : 12, { duration: 1.1 });
   }
 
   var runRemoteSearch = debounce(function (q, seq) {
-    if (q.length < 3) return;
+    if (q.length < 3 || seq !== searchSeq) return;
     var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=4&q=' +
               encodeURIComponent(q);
     fetch(url, { headers: { Accept: 'application/json' } })
       .then(function (r) { return r.ok ? r.json() : []; })
       .then(function (list) {
-        if (seq !== searchSeq || !list.length) return;
+        if (seq !== searchSeq) return;
+        if (!list.length) {
+          if (!searchRows.length) renderResults([], false);
+          return;
+        }
         var extra = list.map(function (p) {
           var parts = (p.display_name || '').split(',');
           return {
@@ -1178,15 +1206,17 @@
         }).slice(0, 8);
         renderResults(merged);
       })
-      .catch(function () { /* local results still stand */ });
-  }, 420);
+      .catch(function () {
+        if (seq === searchSeq && !searchRows.length) renderResults([], false);
+      });
+  }, 300);
 
   searchInput.addEventListener('input', function () {
     var q = searchInput.value.trim();
     $('searchClear').hidden = !q;
     var seq = ++searchSeq;
     if (q.length < 2) { closeResults(); return; }
-    renderResults(localMatches(q));
+    renderResults(localMatches(q), q.length >= 3);
     runRemoteSearch(q, seq);
   });
 
