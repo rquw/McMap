@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#ffffff">
+<script>try{document.documentElement.dataset.theme=localStorage.getItem("mcmap.theme")||"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
+<meta name="description" content="Every McDonald's on Earth, on one map. Mark the ones you've been to.">
+<title>McMap</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📍</text></svg>">
+<link rel="preload" href="data/mcdonalds.json" as="fetch" crossorigin>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="stylesheet" href="styles.css?v=afa93b64">
+</head>
+<body>
+
+<div id="map" aria-label="World map of McDonald's locations"></div>
+
+<header class="brand">
+  <button class="brand__btn" id="statsBtn" type="button" aria-label="Your stats">
+    <span class="brand__mark"><i>Mc</i>Map</span>
+    <span class="brand__count" id="brandCount">0</span>
+  </button>
+</header>
+
+<div class="search" id="search">
+  <svg class="search__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.6" cy="10.6" r="6.4"/><path d="M15.4 15.4l4.2 4.2"/></svg>
+  <input id="searchInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">
+  <button class="search__clear" id="searchClear" type="button" aria-label="Clear" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>
+  <ul class="search__results" id="searchResults" role="listbox"></ul>
+</div>
+
+<div class="progress" id="progress" role="status" aria-live="polite">
+  <div class="progress__row">
+    <p class="progress__text" id="progressText"></p>
+    <span class="progress__num" id="progressNum"></span>
+  </div>
+  <div class="progress__track"><div class="progress__fill" id="progressFill"></div></div>
+</div>
+
+<div class="controls">
+  <button class="ctrl" id="themeBtn" type="button" aria-label="Switch theme" title="Switch theme">
+    <svg class="ctrl__sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.4M12 19v2.4M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.6 12H5M19 12h2.4M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+    <svg class="ctrl__moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.4A8.4 8.4 0 019.6 4a8.4 8.4 0 1010.4 10.4z"/></svg>
+  </button>
+  <button class="ctrl" id="locateBtn" type="button" aria-label="Go to my location" title="My location">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.4"/><path d="M12 2.5v3.2M12 18.3v3.2M2.5 12h3.2M18.3 12h3.2"/><circle cx="12" cy="12" r="7.4" class="ring"/></svg>
+  </button>
+</div>
+
+<div class="hint" id="hint" hidden></div>
+
+<aside class="panel" id="panel" aria-hidden="true">
+  <div class="panel__grab"></div>
+  <button class="panel__close" id="panelClose" type="button" aria-label="Close">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>
+
+  <div class="panel__head">
+    <span class="panel__badge" id="panelBadge" data-t="notVisited"></span>
+    <h2 class="panel__name" id="panelName">McDonald's</h2>
+    <p class="panel__addr" id="panelAddr"></p>
+  </div>
+
+  <div class="stars" id="stars" role="group" aria-label="Your rating">
+    <button type="button" data-v="1" aria-label="1"></button>
+    <button type="button" data-v="2" aria-label="2"></button>
+    <button type="button" data-v="3" aria-label="3"></button>
+    <button type="button" data-v="4" aria-label="4"></button>
+    <button type="button" data-v="5" aria-label="5"></button>
+  </div>
+  <p class="stars__hint" id="starsHint" data-t="rateHint"></p>
+
+  <button class="visit" id="visitBtn" type="button">
+    <span class="visit__check" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4.5 12.6l5 5 10-10.2"/></svg></span>
+    <span id="visitLabel" data-t="visitAction"></span>
+  </button>
+
+  <div class="maps">
+    <a class="maps__btn" id="gmapsLink" target="_blank" rel="noopener" data-t="googleMaps"></a>
+    <a class="maps__btn" id="amapsLink" target="_blank" rel="noopener" data-t="appleMaps"></a>
+  </div>
+
+  <dl class="facts" id="facts"></dl>
+</aside>
+
+<aside class="sheet" id="sheet" aria-hidden="true">
+  <div class="sheet__card">
+    <button class="panel__close" id="sheetClose" type="button" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <h2 class="sheet__title" data-t="yourMap"></h2>
+    <div class="sheet__grid" id="sheetGrid"></div>
+
+    <div class="lang lang--sheet" role="group">
+      <button class="lang__opt" type="button" data-lang="en">English</button>
+      <button class="lang__opt" type="button" data-lang="de">Deutsch</button>
+    </div>
+
+    <p class="sheet__note" data-t="savedLocal"></p>
+    <button class="sheet__reset" id="resetBtn" type="button" data-t="reset"></button>
+  </div>
+</aside>
+
+<div class="intro" id="intro">
+  <div class="intro__card">
+    <div class="intro__pin" aria-hidden="true"><span></span></div>
+    <h1 class="intro__title"><i>Mc</i>Map</h1>
+    <p class="intro__sub" data-t="tagline" data-thtml="1"></p>
+
+    <div class="lang" role="group" aria-label="Language">
+      <button class="lang__opt" type="button" data-lang="en">English</button>
+      <button class="lang__opt" type="button" data-lang="de">Deutsch</button>
+    </div>
+
+    <button class="intro__go" id="introLocate" type="button" data-t="start"></button>
+    <button class="intro__skip" id="introSkip" type="button" data-t="skip"></button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
+<script src="data/continents.js?v=fdc31795"></script>
+<script src="i18n.js?v=099ad812"></script>
+<script src="app.js?v=ddd06cd5"></script>
+</body>
+</html>

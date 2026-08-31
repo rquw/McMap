@@ -1,0 +1,3 @@
+# Raw SPARQL dumps (~35 MB). Regenerate with tools/fetch_raw.sh.
+build/
+.DS_Store
