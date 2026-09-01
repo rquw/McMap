@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""Turn the raw QLever CSV dumps in build/ into the bundled dataset the app ships.
+"""Build the bundled dataset from the raw QLever CSVs in build/.
 
-Run tools/fetch_raw.sh first to refresh build/*.csv, then this.
-
-Output is columnar rather than a list of objects: parallel arrays plus string
-tables for the repeated values (country, region, city, street). That roughly
-halves the byte count versus one object per restaurant, and JSON.parse handles
-flat number arrays far faster than 36k little objects.
+Run tools/fetch_raw.sh first. Output is columnar (parallel arrays + string
+tables) rather than one object per restaurant: about half the bytes and much
+faster to parse.
 """
 
 import csv, json, math, os, re, sys, datetime, collections
@@ -48,8 +45,7 @@ NUMPAIR = re.compile(r'(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)')
 
 
 def centroid(wkt):
-    """Centre of a WKT geometry. Points pass through; rings use the shoelace
-    centroid, falling back to the vertex mean for degenerate shapes."""
+    """Centre of a WKT geometry: shoelace centroid, vertex mean if degenerate."""
     if wkt.startswith('POINT'):
         m = NUMPAIR.search(wkt)
         return (float(m.group(1)), float(m.group(2))) if m else None
@@ -127,8 +123,7 @@ for key, fname in TAGS.items():
 # ---------------------------------------------------------------- admin
 
 print('reading admin boundaries...')
-# per (poi, level) keep the SMALLEST enclosing boundary — overlapping relations
-# are common and the smallest one is the real local unit
+# overlapping boundaries are common; the smallest is the real local unit
 best = collections.defaultdict(lambda: collections.defaultdict(list))
 for r in rows('admin_area.csv'):
     if len(r) < 4:
@@ -161,20 +156,16 @@ for r in rows('countries_osm.csv'):
     country_meta.setdefault(iso, {'local': nm, 'en': en, 'de': de})
 
 REGION_LEVELS = (4, 5, 3, 6)
-# A city is admin_level 8 in most countries, 6-7 in some. City-states such as
-# Vienna, Berlin, Singapore and Hong Kong have no unit below level 4 at all,
-# so level 4 is the last resort -- without it those POIs get no city, and with
-# level 9 in the list they'd get a single district instead of the whole city.
+# city = level 8 usually, 6-7 sometimes. City-states (Wien, Berlin, Singapore)
+# have nothing below 4, hence the last resort.
 CITY_LEVELS = (8, 7, 6, 4)
 DISTRICT_LEVELS = (9, 10)
 
-# Austria tags cadastral parcels as admin_level 10 ("Katastralgemeinde Innere
-# Stadt"). They're a land-registry unit, not a neighbourhood anyone names.
+# AT uses level 10 for cadastral parcels, not neighbourhoods
 DISTRICT_SKIP = re.compile(r'^(katastralgemeinde|gemarkung|cadastral)\b', re.I)
 
-# Coastal restaurants sit inside territorial-water relations, which are tagged
-# admin_level=2 but carry no ISO code. Walk candidates smallest-first and take
-# the first that actually names a country.
+# territorial waters are level 2 with no ISO code, so take the smallest
+# candidate that actually names a country
 ISO_FALLBACK = {
     '中華民國12浬領海外界線': 'TW',
     '中華民國': 'TW',
@@ -226,8 +217,8 @@ print('  district: %d' % sum(1 for p in pois.values() if p.get('district')))
 
 # ---------------------------------------------------------------- dedupe
 
-# A restaurant mapped as both a node and its building way shows up twice.
-# Keep the node so ids stay stable — the app applies the same rule.
+# node + its building way = same restaurant twice. Keep the node; the app
+# applies the same rule so ids stay stable.
 print('deduping...')
 grid = collections.defaultdict(list)
 for p in pois.values():
@@ -244,7 +235,7 @@ for p in sorted(pois.values(), key=lambda q: q['id']):
                 if q['id'][0] == 'n' or q['id'] in drop:
                     continue
                 if haversine(p['lat'], p['lon'], q['lat'], q['lon']) < 40:
-                    # fold any richer tags from the way onto the surviving node
+                    # keep the way's richer tags
                     for k, v in q.items():
                         p.setdefault(k, v)
                     drop.add(q['id'])
@@ -257,7 +248,7 @@ print('  %d restaurants kept' % len(kept))
 # ---------------------------------------------------------------- encode
 
 class Table:
-    """Interns repeated strings; index 0 always means 'absent'."""
+    """Interns repeated strings; 0 means absent."""
     def __init__(self):
         self.items, self.index = [''], {'': 0}
 
@@ -307,8 +298,7 @@ for p in kept:
 
 
 def delta(seq):
-    """Sorted-by-latitude means these deltas are small non-negative integers,
-    which is worth roughly a third of the file."""
+    """Latitude-sorted, so deltas stay small. Worth about a third of the file."""
     out, prev = [], 0
     for v in seq:
         out.append(v - prev)
@@ -319,7 +309,7 @@ def delta(seq):
 STAMP = datetime.date.today().isoformat()
 SOURCE = 'OpenStreetMap via QLever (qlever.dev/api/osm-planet)'
 
-# Core: everything the map needs to draw pins and count. Loaded before first paint.
+# core: pins + counts, loaded before first paint
 core = {
     'v': 1,
     'generated': STAMP,
@@ -340,7 +330,7 @@ core = {
     'district': dists,
 }
 
-# Details: only needed once a pin is opened. Fetched in the background.
+# details: only needed once a pin is opened
 details = {
     'v': 1,
     'generated': STAMP,

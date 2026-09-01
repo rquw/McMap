@@ -1,5 +1,4 @@
-/* McMap — interface strings. Place names stay in their local language
-   (Wien, 日本); only the interface switches. */
+// Interface strings. Place names stay local (Wien, 日本); only the UI switches.
 (function () {
   'use strict';
 
@@ -56,7 +55,7 @@
         SA: 'South America', OC: 'Oceania', AN: 'Antarctica'
       },
 
-      /* n = total, been = visited, place = HTML-safe label (null for Earth) */
+      // n = total, been = visited, place = label (null for Earth)
       progress: function (been, n, place, isEarth, inView) {
         if (inView) {
           if (n === 1) {

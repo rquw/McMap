@@ -1,12 +1,4 @@
-/* ============================================================
-   McMap — every McDonald's on Earth, on one map.
-
-   Every restaurant ships with the app (data/mcdonalds.json, built by
-   tools/build_dataset.py from OpenStreetMap). Nothing is queried while you
-   browse: pins, totals and progress are all computed locally, so the numbers
-   appear the moment you move the map. The only network call during use is the
-   optional boundary outline, and that never blocks anything.
-   ============================================================ */
+// McMap. Dataset is bundled; nothing is fetched while browsing.
 (function () {
   'use strict';
 
@@ -20,9 +12,7 @@
   var MAX_PINS = 500;   // beyond this the view becomes dots instead of pins
   var DOT_PAD = 0.25;   // extra canvas around the viewport, so dragging doesn't tear
 
-  /* ---------------------------------------------------------
-     helpers
-     --------------------------------------------------------- */
+  // helpers
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -48,9 +38,7 @@
     return 2 * R * Math.asin(Math.sqrt(x));
   }
 
-  /* ---------------------------------------------------------
-     language
-     --------------------------------------------------------- */
+  // language
 
   var lang = 'en';
   var T = I18N.en;
@@ -95,9 +83,7 @@
     });
   }
 
-  /* ---------------------------------------------------------
-     storage
-     --------------------------------------------------------- */
+  // storage
 
   var store = {
     data: { visits: {}, introDone: false },
@@ -138,9 +124,7 @@
     clear: function () { this.data.visits = {}; this.save(); }
   };
 
-  /* ---------------------------------------------------------
-     the dataset
-     --------------------------------------------------------- */
+  // the dataset
 
   var DB = null;
 
@@ -161,9 +145,7 @@
       byId.set(ids[i], i);
     }
 
-    /* Normalised Web Mercator, computed once. Redrawing the dot canvas is then
-       a multiply and a subtract per restaurant instead of a Leaflet projection
-       call, which is the difference between a smooth pan and a stuttering one. */
+    // mercator up front, so a dot redraw is just multiply + subtract
     var mx = new Float64Array(n), my = new Float64Array(n);
     for (i = 0; i < n; i++) {
       mx[i] = (lon[i] + 180) / 360;
@@ -186,8 +168,7 @@
     };
   }
 
-  /* Every scope the progress bar can describe, precomputed once: how many
-     restaurants it holds and the box it covers. Counting later is a lookup. */
+  // count + bbox per scope, so counting later is a lookup
   function buildGroups() {
     var g = { country: new Map(), region: new Map(), city: new Map(),
               district: new Map(), cont: new Map() };
@@ -219,7 +200,7 @@
     }
   }
 
-  /* Coarse grid so "what's near the cursor" and viewport scans stay cheap. */
+  // coarse grid to keep nearest-lookups and viewport scans cheap
   function buildGrid() {
     var grid = new Map();
     for (var i = 0; i < DB.n; i++) {
@@ -232,8 +213,7 @@
 
   function loadData() {
     setHint(T.loading);
-    /* no-cache still uses the ETag, so a rebuilt dataset is picked up on the
-       next load while an unchanged one costs a single 304. */
+    // no-cache still sends the ETag, so unchanged data costs a 304
     return fetch('data/mcdonalds.json', { cache: 'no-cache' })
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -249,8 +229,7 @@
         updateProgress();
         updateBrandCount();
 
-        /* Addresses and opening hours only matter once a pin is open, so they
-           arrive after the map is already usable. */
+        // only needed once a pin is open
         fetch('data/mcdonalds-details.json', { cache: 'no-cache' })
           .then(function (r) { return r.ok ? r.json() : null; })
           .then(function (d) {
@@ -265,7 +244,7 @@
       });
   }
 
-  /* ---- per-restaurant accessors ---- */
+  // per-restaurant accessors
 
   function idAt(i) { return DB.ids[i]; }
   function ccAt(i) { return DB.countries[DB.cc[i]] || ''; }
@@ -294,9 +273,7 @@
     return m[lang] || m.en || m.local || cc;
   }
 
-  /* ---------------------------------------------------------
-     map
-     --------------------------------------------------------- */
+  // map
 
   var ATTRIB = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &middot; ' +
                '<a href="https://openfreemap.org">OpenFreeMap</a>';
@@ -335,12 +312,8 @@
 
   L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-  /* Leaflet's wheel handler waits out a debounce and then starts a 250 ms zoom
-     animation. On a trackpad the next event lands long before that finishes,
-     so every animation is cancelled by the one after it and the gesture
-     stutters. Applying the accumulated delta once per animation frame, with no
-     animation at all, is what continuous zoom is meant to feel like — the
-     frames themselves are the animation. */
+  // one zoom per frame, unanimated. Leaflet's debounced handler restarts a
+  // 250ms animation per event, which on a trackpad just stutters.
   map.scrollWheelZoom.disable();
 
   var wheelAccum = 0, wheelPoint = null, wheelFrame = null;
@@ -356,8 +329,7 @@
     if (step > WHEEL_MAX_PER_FRAME) step = WHEEL_MAX_PER_FRAME;
     else if (step < -WHEEL_MAX_PER_FRAME) step = -WHEEL_MAX_PER_FRAME;
 
-    // keep whatever we clamped off and spend it on the following frames, so a
-    // fast flick glides to a stop rather than teleporting
+    // spend the clamped remainder on later frames so a flick glides
     wheelAccum -= step * WHEEL_PX_PER_ZOOM;
     if (Math.abs(wheelAccum) < 1) wheelAccum = 0;
 
@@ -380,7 +352,7 @@
     if (e.deltaMode === 1) dy *= 20;          // reported in lines
     else if (e.deltaMode === 2) dy *= 400;    // reported in pages
 
-    // a trackpad pinch arrives as ctrl+wheel with much smaller deltas
+    // trackpad pinch arrives as ctrl+wheel
     wheelAccum += e.ctrlKey ? dy * 3 : dy;
     wheelPoint = map.mouseEventToContainerPoint(e);
 
@@ -395,9 +367,7 @@
   map.getPane('dots').style.zIndex = 450;
   map.getPane('dots').style.pointerEvents = 'none';
 
-  /* ---------------------------------------------------------
-     markers
-     --------------------------------------------------------- */
+  // markers
 
   var markers = new Map();     // index -> L.Marker
   var selectedIdx = -1;
@@ -467,8 +437,7 @@
     return false;
   }
 
-  /* Indices inside a view. Uses the 1-degree grid when that's cheaper than a
-     full scan, and falls back to scanning when the view spans the planet. */
+  // grid lookup, or a full scan once the view spans most of the planet
   function indicesInBounds(b, cap) {
     var out = [];
     if (!DB) return out;
@@ -503,21 +472,14 @@
     return out;
   }
 
-  /* ---------------------------------------------------------
-     dot layer
-
-     36k DOM pins is not a thing a browser will do. Past the pin budget every
-     restaurant is drawn as a translucent dot on a single canvas, so nothing
-     ever disappears just because you zoomed out.
-     --------------------------------------------------------- */
+  // dot layer — 36k DOM pins is not viable, so past the budget they're canvas
 
   var pinned = new Set();
 
   var DotLayer = L.Layer.extend({
     onAdd: function (map) {
-      /* leaflet-zoom-animated gives us transform-origin: 0 0 and the shared
-         zoom transition. Without it the canvas scales about its own centre and
-         every dot slides away during the zoom, snapping back on settle. */
+      // leaflet-zoom-animated for transform-origin: 0 0, else it scales about
+      // its own centre and the dots drift away mid-zoom
       var c = this._canvas = L.DomUtil.create('canvas', 'mcmap-dots leaflet-zoom-animated');
       this._ctx = c.getContext('2d');
       map.getPane('dots').appendChild(c);
@@ -535,8 +497,6 @@
       map.off('zoomanim', this._zoomAnim, this);
     },
 
-    /* Ride the zoom animation with a transform, the way Leaflet's own canvas
-       renderer does, then redraw sharply once it settles. */
     _zoomAnim: function (e) {
       var map = this._map;
       var scale = map.getZoomScale(e.zoom, map.getZoom());
@@ -544,8 +504,7 @@
       L.DomUtil.setTransform(this._canvas, offset, scale);
     },
 
-    /* Wheel zooming applies a new zoom every frame, so reset can fire far more
-       often than we can usefully draw. Collapse it to one pass per frame. */
+    // wheel zoom changes zoom every frame; one redraw per frame is plenty
     _schedule: function () {
       var self = this;
       if (this._frame) return;
@@ -555,10 +514,8 @@
       });
     },
 
-    /* Park the canvas over the padded viewport and remember where that is.
-       Dot pixel positions are derived from this, so the two must never be
-       computed from different map states — if they are, every dot lands at a
-       stale offset and the layer looks like it slid off the map. */
+    // dot positions derive from this, so both must come from the same
+    // map state or the whole layer draws at a stale offset
     _place: function () {
       var map = this._map;
       var size = map.getSize();
@@ -626,8 +583,7 @@
         ctx.globalAlpha = alpha;
         ctx.fillStyle = color;
 
-        /* At a few thousand dots the arc calls dominate the frame, and at this
-           radius a square is indistinguishable anyway. */
+        // arcs get expensive in bulk and squares look the same this small
         if (list.length > 3000) {
           var d = r * 2;
           for (var m = 0; m < list.length; m++) {
@@ -659,8 +615,7 @@
     var candidates = indicesInBounds(b, MAX_PINS + 1);
     var wanted = new Set();
 
-    // Past the budget everything becomes a dot, visited ones included — a lone
-    // green pin floating over a field of dots just looks like a mistake.
+    // past the budget everything is a dot, visited included
     if (candidates.length <= MAX_PINS) {
       candidates.forEach(function (i) { wanted.add(i); });
     }
@@ -677,9 +632,7 @@
     dots.redraw();
   }
 
-  /* ---------------------------------------------------------
-     progress
-     --------------------------------------------------------- */
+  // progress
 
   var progressEl = $('progress');
   var progressText = $('progressText');
@@ -696,9 +649,8 @@
     return 'world';
   }
 
-  /* The single definition of a scope key. Districts carry their city because
-     207 district names (Innere Stadt, Centro, Belmont...) repeat across cities
-     in the same country and would otherwise be counted as one place. */
+  // district names repeat across cities (Innere Stadt, Centro, ...), so the
+  // key has to carry the city too
   function keyOf(level, i) {
     var cc = DB.cc[i];
     if (level === 'country') return 'c' + cc;
@@ -713,8 +665,7 @@
     return '';
   }
 
-  /* Which group is the map centred on? Prefer the smallest group whose box
-     contains the centre; otherwise fall back to the nearest restaurant. */
+  // smallest box containing the centre, else nearest restaurant
   function scopeKey(level, c) {
     var map_ = DB.groups[level];
     if (!map_) return null;
@@ -752,8 +703,7 @@
     return best;
   }
 
-  /* How many of your visits fall inside a group. Visits are few, so this walks
-     the visit list rather than the 36k restaurants. */
+  // walks the visits, not the 36k restaurants
   function visitedIn(level, key) {
     var n = 0;
     store.visitedIds().forEach(function (id) {
@@ -826,9 +776,7 @@
     progressFill.style.width = ((been / total) * 100).toFixed(2) + '%';
   }
 
-  /* ---------------------------------------------------------
-     boundary outline — decorative, always async, never blocking
-     --------------------------------------------------------- */
+  // boundary outline
 
   var outline = null;
   var outlineKey = null;
@@ -892,9 +840,7 @@
     outlineKey = null;
   }
 
-  /* ---------------------------------------------------------
-     detail panel
-     --------------------------------------------------------- */
+  // detail panel
 
   var panel = $('panel');
   var starsEl = $('stars');
@@ -1010,8 +956,7 @@
 
   $('panelClose').addEventListener('click', closePanel);
 
-  /* In dot mode there are no markers to click, so fall back to "whatever is
-     within a finger's width of the tap". */
+  // no markers in dot mode, so hit-test the nearest one instead
   map.on('click', function (e) {
     if (!DB) { closePanel(); return; }
     var p = map.latLngToContainerPoint(e.latlng);
@@ -1032,9 +977,7 @@
     if (e.key === 'Escape') { closePanel(); closeSheet(); }
   });
 
-  /* ---------------------------------------------------------
-     stats sheet
-     --------------------------------------------------------- */
+  // stats sheet
 
   var sheet = $('sheet');
 
@@ -1097,9 +1040,7 @@
     toast(T.cleared);
   });
 
-  /* ---------------------------------------------------------
-     hint + toast
-     --------------------------------------------------------- */
+  // hint + toast
 
   var hintEl = $('hint');
   var hintTimer;
@@ -1123,13 +1064,7 @@
     toastTimer = setTimeout(function () { toastEl.classList.remove('is-on'); }, 1900);
   }
 
-  /* ---------------------------------------------------------
-     search
-
-     Searches the bundled place names first, so results appear as you type with
-     no network at all. Nominatim is only consulted for things the dataset
-     can't know about — streets, landmarks, postcodes.
-     --------------------------------------------------------- */
+  // search — bundled names first, Nominatim only for streets and landmarks
 
   var searchBox = $('search');
   var searchInput = $('searchInput');
@@ -1188,15 +1123,14 @@
       var e = idx[i];
       var at = e.norm.indexOf(nq);
       if (at < 0) continue;
-      // exact, then prefix, then anywhere; bigger places break ties
+      // exact, then prefix, then anywhere; ties go to bigger places
       var rank = e.norm === nq ? 0 : (at === 0 ? 1 : 2);
       hits.push([rank, -e.n, e]);
       if (hits.length > 4000) break;
     }
     hits.sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
 
-    /* City-states appear twice — Wien the region and Wien the city hold the
-       same restaurants. One row is enough. */
+    // city-states show up as both a region and a city
     var seen = {}, out = [];
     for (var h = 0; h < hits.length && out.length < 7; h++) {
       var e = hits[h][2];
@@ -1212,8 +1146,7 @@
     searchRows = rows;
     searchCursor = -1;
     if (!rows.length) {
-      /* The bundled names are the local ones (東京都, not Tokyo), so an empty
-         local result usually just means the wider search hasn't landed yet. */
+      // bundled names are local ones (東京都, not Tokyo)
       searchResults.innerHTML = '<li class="search__empty">' +
         esc(pending ? T.searching : T.noResults) + '</li>';
       searchResults.classList.add('is-open');
@@ -1235,9 +1168,8 @@
     searchCursor = -1;
   }
 
-  /* Fly to a result by centre + zoom rather than flyToBounds: getBoundsZoom
-     returns NaN for a degenerate box or a container that has no size yet, and
-     Leaflet then throws on the NaN centre instead of just not moving. */
+  // centre + zoom, not flyToBounds: getBoundsZoom returns NaN for a
+  // degenerate box and Leaflet then throws
   function gotoResult(r) {
     closeResults();
     searchInput.blur();
@@ -1335,9 +1267,7 @@
     if (!searchBox.contains(e.target)) closeResults();
   });
 
-  /* ---------------------------------------------------------
-     geolocation
-     --------------------------------------------------------- */
+  // geolocation
 
   var userPos = null;
   var meMarker = null;
@@ -1370,9 +1300,7 @@
 
   $('locateBtn').addEventListener('click', function () { locate(15); });
 
-  /* ---------------------------------------------------------
-     theme
-     --------------------------------------------------------- */
+  // theme
 
   $('themeBtn').addEventListener('click', function () {
     var next = theme() === 'dark' ? 'light' : 'dark';
@@ -1385,9 +1313,7 @@
     }
   });
 
-  /* ---------------------------------------------------------
-     intro
-     --------------------------------------------------------- */
+  // intro
 
   var intro = $('intro');
 
@@ -1408,9 +1334,7 @@
     b.addEventListener('click', function () { setLang(b.dataset.lang, true); });
   });
 
-  /* ---------------------------------------------------------
-     wiring
-     --------------------------------------------------------- */
+  // wiring
 
   var onMove = debounce(function () {
     renderMarkers();
@@ -1423,9 +1347,7 @@
     if (window.innerWidth > 720) progressEl.classList.remove('is-pushed');
   }, 150));
 
-  /* Leaflet only watches window resize, so a container that changes size on its
-     own — a rotated phone, a tab that was hidden at load, a split view — leaves
-     the map convinced it is still the old size. */
+  // Leaflet only watches window resize, not the container
   if (window.ResizeObserver) {
     var lastW = 0, lastH = 0;
     new ResizeObserver(debounce(function () {
@@ -1442,7 +1364,7 @@
 
   window.McMap = { map: map, store: store, db: function () { return DB; } };
 
-  /* boot */
+  // boot
   store.load();
   setLang(pickLang(), false);
   updateBrandCount();
