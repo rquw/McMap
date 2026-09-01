@@ -7,7 +7,7 @@ mark as visited and get directions on Apple and Google Maps.
 
 Not all McDonald's restaurants are included. You can view where the data is from below.
 
-**→ [rquw.github.io/McMap](https://rquw.github.io/McMap)**
+** [rquw.github.io/McMap](https://rquw.github.io/McMap)**
 
 Restaurant data: [OpenStreetMap](https://www.openstreetmap.org) via [QLever](https://qlever.dev)
 Basemap: [OpenFreeMap](https://openfreemap.org)
